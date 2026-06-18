@@ -616,11 +616,17 @@
         if (!sheetName) sheetName = wb.SheetNames[1]; // fallback: 2nd sheet
         if (!sheetName) sheetName = wb.SheetNames[0]; // last resort: 1st sheet
 
-        console.log('Using sheet:', sheetName);
-        const ws = wb.Sheets[sheetName];
+        console.log('Sheets object keys:', Object.keys(wb.Sheets));
 
-        console.log('Worksheet object:', ws ? 'exists' : 'undefined');
-        if (!ws) throw new Error(`Could not read sheet. Available: ${wb.SheetNames.join(', ')}`);
+        // Access sheet directly by matching key from Sheets object
+        const sheetKey = Object.keys(wb.Sheets).find(k => k.trim().toLowerCase() === 'promotion')
+                      || Object.keys(wb.Sheets)[1]
+                      || Object.keys(wb.Sheets)[0];
+
+        console.log('Using sheet key:', sheetKey);
+        const ws = wb.Sheets[sheetKey];
+
+        if (!ws) throw new Error(`Sheet object undefined for key "${sheetKey}". Keys: ${Object.keys(wb.Sheets).join(', ')}`);
 
         // Force the range — SAP exports often don't set !ref correctly
         ws['!ref'] = 'A1:BV2000';
