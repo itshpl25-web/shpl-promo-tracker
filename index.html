@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SHPL Promotion Tracker</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <style>
     :root {
       --bg: #0f1117;
@@ -596,26 +596,38 @@
     dropSection.style.display = 'none';
 
     const reader = new FileReader();
+    reader.onerror = () => {
+      showToast('error', 'Failed to read file', 'FileReader could not read the file.');
+      resetUI();
+    };
     reader.onload = e => {
       try {
-        const wb = XLSX.read(e.target.result, { type: 'array', cellFormula: false });
+        console.log('File loaded, size:', e.target.result.byteLength);
+        console.log('XLSX version:', XLSX.version);
+
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array', cellFormula: false, cellNF: false, cellStyles: false });
 
         // Log all sheet names for debugging
-        console.log('Sheet names found:', wb.SheetNames);
+        console.log('Sheet names found:', JSON.stringify(wb.SheetNames));
 
-        // Try to find Promotion sheet — by name first, then by index (2nd sheet = index 1)
+        // Try to find Promotion sheet — case-insensitive
         let sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === 'promotion');
         if (!sheetName) sheetName = wb.SheetNames[1]; // fallback: 2nd sheet
-        if (!sheetName) sheetName = wb.SheetNames[0]; // fallback: 1st sheet
+        if (!sheetName) sheetName = wb.SheetNames[0]; // last resort: 1st sheet
 
         console.log('Using sheet:', sheetName);
         const ws = wb.Sheets[sheetName];
 
-        if (!ws) throw new Error(`Could not read sheet. Available sheets: ${wb.SheetNames.join(', ')}`);
+        console.log('Worksheet object:', ws ? 'exists' : 'undefined');
+        if (!ws) throw new Error(`Could not read sheet. Available: ${wb.SheetNames.join(', ')}`);
 
         // Force the range — SAP exports often don't set !ref correctly
         ws['!ref'] = 'A1:BV2000';
         const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
+        console.log('Total rows read:', raw.length);
+        if (raw[7]) console.log('Row 8 sample (first 5 cols):', raw[7].slice(0, 5));
+
         const timestamp = formatTimestamp(new Date());
 
         parsedRows = [];
@@ -644,6 +656,7 @@
         renderPreview();
         showToast('success', 'File loaded', `${parsedRows.length} row${parsedRows.length > 1 ? 's' : ''} ready to review.`);
       } catch (err) {
+        console.error('Error reading file:', err);
         showToast('error', 'Failed to read file', err.message);
         resetUI();
       }
