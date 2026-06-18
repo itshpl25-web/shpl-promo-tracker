@@ -599,10 +599,16 @@
     reader.onload = e => {
       try {
         const wb = XLSX.read(e.target.result, { type: 'array', cellFormula: false });
-        const ws = wb.Sheets['Promotion'];
-        if (!ws) throw new Error('Sheet "Promotion" not found in this file.');
 
-        // Expand range to ensure all columns up to BS (col 71, index 70) are read
+        // Find the Promotion sheet (case-insensitive match)
+        const sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === 'promotion');
+        if (!sheetName) {
+          const found = wb.SheetNames.join(', ');
+          throw new Error(`Sheet "Promotion" not found. Sheets in this file: ${found}`);
+        }
+        const ws = wb.Sheets[sheetName];
+
+        // Expand range to ensure all columns up to BS (col 72) are read
         if (ws['!ref']) {
           const range = XLSX.utils.decode_range(ws['!ref']);
           if (range.e.c < 72) range.e.c = 72;
