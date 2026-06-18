@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SHPL Promotion Tracker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3350;
+      --accent: #4f8ef7;
+      --accent-dim: rgba(79,142,247,0.12);
+      --accent-glow: rgba(79,142,247,0.35);
+      --green: #34d399;
+      --green-dim: rgba(52,211,153,0.12);
+      --red: #f87171;
+      --red-dim: rgba(248,113,113,0.12);
+      --yellow: #fbbf24;
+      --text: #e8eaf0;
+      --text-muted: #7b82a0;
+      --text-dim: #4a5068;
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo-mark {
+      width: 28px; height: 28px;
+      background: var(--accent);
+      border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 800; color: #fff;
+      letter-spacing: -0.5px;
+    }
+
+    header h1 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.2px;
+    }
+
+    header span {
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--text-dim);
+    }
+    .status-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    .status-label {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ── Main layout ── */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 24px 64px;
+    }
+
+    /* ── Drop zone ── */
+    .drop-section {
+      margin-bottom: 28px;
+    }
+
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 48px 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+
+    .drop-zone:hover,
+    .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .drop-zone input[type="file"] {
+      position: absolute; inset: 0;
+      opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+
+    .drop-icon {
+      font-size: 36px;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .drop-zone h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+
+    .drop-zone p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .drop-zone p strong {
+      color: var(--accent);
+    }
+
+    /* ── File badge ── */
+    .file-badge {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      margin-bottom: 20px;
+    }
+
+    .file-badge.visible { display: flex; }
+
+    .file-badge-icon {
+      width: 36px; height: 36px;
+      background: var(--green-dim);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+
+    .file-badge-name {
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    .file-badge-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .file-badge-clear {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      padding: 4px;
+      border-radius: 4px;
+      transition: color 0.15s;
+    }
+    .file-badge-clear:hover { color: var(--red); }
+
+    /* ── Preview section ── */
+    #preview-section { display: none; }
+    #preview-section.visible { display: block; }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+    }
+
+    .row-count {
+      font-size: 12px;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-radius: 20px;
+      padding: 2px 10px;
+      font-weight: 500;
+    }
+
+    /* ── Table ── */
+    .table-wrap {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: auto;
+      max-height: 420px;
+      background: var(--surface);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    thead {
+      position: sticky; top: 0;
+      background: var(--surface2);
+      z-index: 2;
+    }
+
+    th {
+      padding: 11px 14px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(46,51,80,0.5);
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    tr:hover td { background: var(--accent-dim); }
+
+    .td-promo-id { font-family: monospace; font-size: 12px; color: var(--accent); }
+    .td-material { font-family: monospace; font-size: 12px; }
+    .td-desc { max-width: 280px; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+    .td-price { font-family: monospace; text-align: right; }
+    .td-supplier { color: var(--text-muted); }
+
+    .td-status {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--yellow);
+      white-space: nowrap;
+    }
+
+    /* ── Action bar ── */
+    .action-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 20px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: #6ba3f8; box-shadow: 0 0 16px var(--accent-glow); }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-ghost {
+      background: var(--surface2);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--text-muted); }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 28px; right: 28px;
+      min-width: 280px;
+      max-width: 400px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      transform: translateY(80px);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1);
+      z-index: 999;
+      pointer-events: none;
+    }
+
+    #toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .toast-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+    .toast-title { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+    .toast-msg { font-size: 12px; color: var(--text-muted); }
+
+    #toast.toast-success { border-color: rgba(52,211,153,0.4); }
+    #toast.toast-error { border-color: rgba(248,113,113,0.4); }
+    #toast.toast-info { border-color: rgba(79,142,247,0.4); }
+
+    /* ── Spinner ── */
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Instructions card ── */
+    .info-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-top: 28px;
+    }
+
+    .info-card h3 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .step-num {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .step p { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+    .step p strong { color: var(--text); }
+
+    /* ── Empty state ── */
+    .empty-note {
+      padding: 32px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark">SP</div>
+  <h1>Promotion Tracker</h1>
+  <span>/ SHPL</span>
+  <div class="header-right">
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-label" id="statusLabel">Not connected</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- File badge (shown after file selected) -->
+  <div class="file-badge" id="fileBadge">
+    <div class="file-badge-icon">📄</div>
+    <div>
+      <div class="file-badge-name" id="fileName">—</div>
+      <div class="file-badge-meta" id="fileMeta">—</div>
+    </div>
+    <button class="file-badge-clear" id="clearBtn" title="Clear file">✕</button>
+  </div>
+
+  <!-- Drop zone -->
+  <div class="drop-section" id="dropSection">
+    <div class="drop-zone" id="dropZone">
+      <input type="file" id="fileInput" accept=".xlsx,.xls" />
+      <span class="drop-icon">📂</span>
+      <h2>Drop your promotion Excel file here</h2>
+      <p>or <strong>click to browse</strong> &nbsp;·&nbsp; Accepts <strong>.xlsx</strong> files</p>
+    </div>
+  </div>
+
+  <!-- Preview -->
+  <div id="preview-section">
+    <div class="section-header">
+      <span class="section-title">Preview</span>
+      <span class="row-count" id="rowCount">0 rows</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Promo ID</th>
+            <th>Material</th>
+            <th>Description</th>
+            <th>Normal Price</th>
+            <th>Promo Price</th>
+            <th>Supplier</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="previewBody"></tbody>
+      </table>
+    </div>
+
+    <div class="action-bar">
+      <button class="btn btn-primary" id="submitBtn">
+        <span>↑</span> Push to Google Sheets
+      </button>
+      <button class="btn btn-ghost" id="resetBtn">Clear</button>
+      <span id="submitInfo" style="font-size:12px;color:var(--text-muted);margin-left:4px;"></span>
+    </div>
+  </div>
+
+  <!-- Instructions -->
+  <div class="info-card">
+    <h3>How it works</h3>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <p><strong>Prepare your Excel file</strong> — ensure the Promotion sheet is filled from row 8 onwards with all required columns.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <p><strong>Drop or select the file</strong> — the app reads it locally and shows a preview. Nothing is sent yet.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <p><strong>Review the data</strong> — confirm the rows look correct, then click <strong>Push to Google Sheets</strong>.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <p><strong>Done</strong> — rows are appended to the SHPL Promotion Tracking sheet with an automatic timestamp in the Status column.</p>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Toast -->
+<div id="toast">
+  <div class="toast-icon" id="toastIcon">✓</div>
+  <div>
+    <div class="toast-title" id="toastTitle"></div>
+    <div class="toast-msg" id="toastMsg"></div>
+  </div>
+</div>
+
+<script>
+  // ── CONFIG ──────────────────────────────────────────────────────────
+  // Replace this with your deployed Google Apps Script Web App URL
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/library/d/1YMoKChzaqfeXN-n-nnjXTdo3SphNVdkXxausUPPdWjGktAmEGsWvvcOe/1';
+
+  // Column indices (0-based) in the Promotion sheet
+  const COL = {
+    PROMO_ID:    2,   // C
+    MATERIAL:    52,  // BA
+    DESCRIPTION: 62,  // BK
+    NORMAL_P:    66,  // BO
+    PROMO_P:     57,  // BF
+    SUPPLIER:    64,  // BM
+  };
+
+  const DATA_START_ROW = 7; // row 8 = index 7
+  // ────────────────────────────────────────────────────────────────────
+
+  let parsedRows = [];
+
+  const dropZone   = document.getElementById('dropZone');
+  const fileInput  = document.getElementById('fileInput');
+  const fileBadge  = document.getElementById('fileBadge');
+  const fileName   = document.getElementById('fileName');
+  const fileMeta   = document.getElementById('fileMeta');
+  const clearBtn   = document.getElementById('clearBtn');
+  const dropSection= document.getElementById('dropSection');
+  const previewSec = document.getElementById('preview-section');
+  const previewBody= document.getElementById('previewBody');
+  const rowCount   = document.getElementById('rowCount');
+  const submitBtn  = document.getElementById('submitBtn');
+  const resetBtn   = document.getElementById('resetBtn');
+  const submitInfo = document.getElementById('submitInfo');
+
+  // ── Connection check ─────────────────────────────────────────────
+  const statusDot   = document.getElementById('statusDot');
+  const statusLabel = document.getElementById('statusLabel');
+
+  function checkConnection() {
+    if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') {
+      statusDot.className = 'status-dot';
+      statusLabel.textContent = 'Apps Script not configured';
+      return;
+    }
+    fetch(APPS_SCRIPT_URL + '?ping=1')
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(() => {
+        statusDot.className = 'status-dot connected';
+        statusLabel.textContent = 'Connected to Google Sheets';
+      })
+      .catch(() => {
+        statusDot.className = 'status-dot';
+        statusLabel.textContent = 'Could not reach Apps Script';
+      });
+  }
+  checkConnection();
+
+  // ── Drag & drop ──────────────────────────────────────────────────
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+
+  fileInput.addEventListener('change', e => {
+    if (e.target.files[0]) handleFile(e.target.files[0]);
+  });
+
+  // ── File handling ────────────────────────────────────────────────
+  function handleFile(file) {
+    if (!file.name.match(/\.xlsx?$/i)) {
+      showToast('error', 'Invalid file type', 'Please drop an .xlsx Excel file.');
+      return;
+    }
+
+    fileName.textContent = file.name;
+    fileMeta.textContent = (file.size / 1024).toFixed(1) + ' KB';
+    fileBadge.classList.add('visible');
+    dropSection.style.display = 'none';
+
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const ws = wb.Sheets['Promotion'];
+        if (!ws) throw new Error('Sheet "Promotion" not found in this file.');
+
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        const timestamp = formatTimestamp(new Date());
+
+        parsedRows = [];
+        for (let i = DATA_START_ROW; i < raw.length; i++) {
+          const row = raw[i];
+          const promoId = String(row[COL.PROMO_ID] || '').trim();
+          if (!promoId) continue; // skip empty rows
+
+          parsedRows.push({
+            promo_id:    promoId,
+            material:    String(row[COL.MATERIAL]    || '').trim(),
+            description: String(row[COL.DESCRIPTION] || '').trim(),
+            normal_p:    row[COL.NORMAL_P]  !== '' ? row[COL.NORMAL_P]  : '',
+            promo_p:     row[COL.PROMO_P]   !== '' ? row[COL.PROMO_P]   : '',
+            supplier:    String(row[COL.SUPPLIER]    || '').trim(),
+            status:      'Printed on ' + timestamp,
+          });
+        }
+
+        if (parsedRows.length === 0) {
+          showToast('error', 'No data found', 'The Promotion sheet has no data rows from row 8 onwards.');
+          resetUI();
+          return;
+        }
+
+        renderPreview();
+        showToast('success', 'File loaded', `${parsedRows.length} row${parsedRows.length > 1 ? 's' : ''} ready to review.`);
+      } catch (err) {
+        showToast('error', 'Failed to read file', err.message);
+        resetUI();
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function renderPreview() {
+    previewBody.innerHTML = '';
+    parsedRows.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="td-promo-id">${esc(r.promo_id)}</td>
+        <td class="td-material">${esc(r.material)}</td>
+        <td class="td-desc" title="${esc(r.description)}">${esc(r.description)}</td>
+        <td class="td-price">${r.normal_p !== '' ? r.normal_p : '<span style="color:var(--text-dim)">—</span>'}</td>
+        <td class="td-price">${r.promo_p  !== '' ? r.promo_p  : '<span style="color:var(--text-dim)">—</span>'}</td>
+        <td class="td-supplier">${esc(r.supplier)}</td>
+        <td class="td-status">${esc(r.status)}</td>
+      `;
+      previewBody.appendChild(tr);
+    });
+
+    rowCount.textContent = `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''}`;
+    previewSec.classList.add('visible');
+  }
+
+  // ── Submit ───────────────────────────────────────────────────────
+  submitBtn.addEventListener('click', async () => {
+    if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') {
+      showToast('error', 'Not configured', 'Paste your Apps Script URL into the APPS_SCRIPT_URL constant in this file.');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<div class="spinner"></div> Pushing...';
+    submitInfo.textContent = '';
+
+    try {
+      const payload = { rows: parsedRows };
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json();
+      if (json.status === 'ok') {
+        showToast('success', 'Pushed successfully', `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} appended to Google Sheets.`);
+        submitInfo.textContent = `✓ Sent ${parsedRows.length} rows at ${formatTimestamp(new Date())}`;
+        submitBtn.innerHTML = '✓ Done';
+        submitBtn.style.background = 'var(--green)';
+        setTimeout(() => {
+          submitBtn.innerHTML = '↑ Push to Google Sheets';
+          submitBtn.style.background = '';
+          submitBtn.disabled = false;
+        }, 3000);
+      } else {
+        throw new Error(json.message || 'Unknown error from Apps Script.');
+      }
+    } catch (err) {
+      showToast('error', 'Push failed', err.message);
+      submitBtn.innerHTML = '↑ Push to Google Sheets';
+      submitBtn.disabled = false;
+    }
+  });
+
+  // ── Reset ────────────────────────────────────────────────────────
+  clearBtn.addEventListener('click', resetUI);
+  resetBtn.addEventListener('click', resetUI);
+
+  function resetUI() {
+    parsedRows = [];
+    fileInput.value = '';
+    fileBadge.classList.remove('visible');
+    dropSection.style.display = '';
+    previewSec.classList.remove('visible');
+    previewBody.innerHTML = '';
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '↑ Push to Google Sheets';
+    submitBtn.style.background = '';
+    submitInfo.textContent = '';
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────
+  function esc(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function formatTimestamp(d) {
+    const pad = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  function showToast(type, title, msg) {
+    const toast = document.getElementById('toast');
+    const icons = { success: '✓', error: '✕', info: 'ℹ' };
+    toast.className = `toast-${type}`;
+    document.getElementById('toastIcon').textContent = icons[type];
+    document.getElementById('toastTitle').textContent = title;
+    document.getElementById('toastMsg').textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 4000);
+  }
+</script>
+
+</body>
+</html>
