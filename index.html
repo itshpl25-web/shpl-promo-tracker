@@ -600,15 +600,20 @@
       try {
         const wb = XLSX.read(e.target.result, { type: 'array', cellFormula: false });
 
-        // Find the Promotion sheet (case-insensitive match)
-        const sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === 'promotion');
-        if (!sheetName) {
-          const found = wb.SheetNames.join(', ');
-          throw new Error(`Sheet "Promotion" not found. Sheets in this file: ${found}`);
-        }
+        // Log all sheet names for debugging
+        console.log('Sheet names found:', wb.SheetNames);
+
+        // Try to find Promotion sheet — by name first, then by index (2nd sheet = index 1)
+        let sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === 'promotion');
+        if (!sheetName) sheetName = wb.SheetNames[1]; // fallback: 2nd sheet
+        if (!sheetName) sheetName = wb.SheetNames[0]; // fallback: 1st sheet
+
+        console.log('Using sheet:', sheetName);
         const ws = wb.Sheets[sheetName];
 
-        // Force the range to cover all data — some SAP exports don't set !ref correctly
+        if (!ws) throw new Error(`Could not read sheet. Available sheets: ${wb.SheetNames.join(', ')}`);
+
+        // Force the range — SAP exports often don't set !ref correctly
         ws['!ref'] = 'A1:BV2000';
         const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
         const timestamp = formatTimestamp(new Date());
@@ -631,7 +636,7 @@
         }
 
         if (parsedRows.length === 0) {
-          showToast('error', 'No data found', 'The Promotion sheet has no data rows from row 8 onwards.');
+          showToast('error', 'No data found', `Sheet "${sheetName}" has no data from row 8 onwards. Total rows read: ${raw.length}`);
           resetUI();
           return;
         }
