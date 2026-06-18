@@ -514,16 +514,17 @@
 <script>
   // ── CONFIG ──────────────────────────────────────────────────────────
   // Replace this with your deployed Google Apps Script Web App URL
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/library/d/1YMoKChzaqfeXN-n-nnjXTdo3SphNVdkXxausUPPdWjGktAmEGsWvvcOe/1';
+  const APPS_SCRIPT_URL = 'YOUR_APPS_SCRIPT_URL_HERE';
 
   // Column indices (0-based) in the Promotion sheet
+  // Verified from actual SAP export files
   const COL = {
-    PROMO_ID:    2,   // C
-    MATERIAL:    52,  // BA
-    DESCRIPTION: 62,  // BK
-    NORMAL_P:    66,  // BO
-    PROMO_P:     57,  // BF
-    SUPPLIER:    64,  // BM
+    PROMO_ID:    2,   // C  — Promotion ID
+    MATERIAL:    52,  // BA — Material number
+    DESCRIPTION: 62,  // BK — Material description (internal use)
+    NORMAL_P:    66,  // BO — Normal price
+    PROMO_P:     57,  // BF — Value (promo price)
+    SUPPLIER:    64,  // BM — Supplier code
   };
 
   const DATA_START_ROW = 7; // row 8 = index 7
@@ -597,10 +598,16 @@
     const reader = new FileReader();
     reader.onload = e => {
       try {
-        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const wb = XLSX.read(e.target.result, { type: 'array', cellFormula: false });
         const ws = wb.Sheets['Promotion'];
         if (!ws) throw new Error('Sheet "Promotion" not found in this file.');
 
+        // Expand range to ensure all columns up to BS (col 71, index 70) are read
+        if (ws['!ref']) {
+          const range = XLSX.utils.decode_range(ws['!ref']);
+          if (range.e.c < 72) range.e.c = 72;
+          ws['!ref'] = XLSX.utils.encode_range(range);
+        }
         const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
         const timestamp = formatTimestamp(new Date());
 
