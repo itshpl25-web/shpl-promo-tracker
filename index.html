@@ -608,13 +608,9 @@
         }
         const ws = wb.Sheets[sheetName];
 
-        // Expand range to ensure all columns up to BS (col 72) are read
-        if (ws['!ref']) {
-          const range = XLSX.utils.decode_range(ws['!ref']);
-          if (range.e.c < 72) range.e.c = 72;
-          ws['!ref'] = XLSX.utils.encode_range(range);
-        }
-        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        // Force the range to cover all data — some SAP exports don't set !ref correctly
+        ws['!ref'] = 'A1:BV2000';
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
         const timestamp = formatTimestamp(new Date());
 
         parsedRows = [];
