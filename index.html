@@ -614,29 +614,33 @@
         console.log('SheetNames:', JSON.stringify(wb.SheetNames));
         console.log('Sheets keys:', JSON.stringify(Object.keys(wb.Sheets)));
 
-        // Try each possible key variation for Promotion sheet
-        let ws = wb.Sheets['Promotion']
-               || wb.Sheets['promotion']
-               || wb.Sheets['PROMOTION'];
+        // SheetJS sometimes loads sheets in rId order, not display order.
+        // SheetNames = display order, wb.Sheets keys = may differ.
+        // Strategy: match SheetNames index to wb.Sheets values by position.
+        const sheetNames = wb.SheetNames;
+        const sheetKeys  = Object.keys(wb.Sheets);
+        console.log('SheetNames:', JSON.stringify(sheetNames));
+        console.log('Sheets keys:', JSON.stringify(sheetKeys));
 
-        // If still not found, try index-based (Promotion is 2nd sheet, index 1)
-        if (!ws) {
-          const idx = wb.SheetNames.findIndex(n => n.toLowerCase().includes('promo'));
-          if (idx >= 0) {
-            const key = Object.keys(wb.Sheets)[idx] || wb.SheetNames[idx];
-            ws = wb.Sheets[key];
-            console.log('Tried index fallback key:', key, '— found:', !!ws);
-          }
+        // Find index of 'Promotion' in SheetNames
+        const promoIdx = sheetNames.findIndex(n => n.trim().toLowerCase() === 'promotion');
+        console.log('Promotion index in SheetNames:', promoIdx);
+
+        // Get the sheet by that same positional index from Sheets values
+        let ws = null;
+        if (promoIdx >= 0) {
+          const sheetVals = Object.values(wb.Sheets);
+          ws = wb.Sheets[sheetNames[promoIdx]]  // try direct name match first
+            || sheetVals[promoIdx]               // try positional match
+            || sheetVals[1]                      // fallback: 2nd sheet
+            || sheetVals[0];
+        } else {
+          const sheetVals = Object.values(wb.Sheets);
+          ws = sheetVals[1] || sheetVals[0];
         }
 
-        // Last resort: try accessing by position in Sheets object
-        if (!ws) {
-          const sheetValues = Object.values(wb.Sheets);
-          ws = sheetValues[1] || sheetValues[0]; // 2nd sheet = Promotion
-          console.log('Last resort: using sheet by position, found:', !!ws);
-        }
-
-        if (!ws) throw new Error(`Cannot access Promotion sheet. SheetNames: ${wb.SheetNames.join(', ')}, Keys: ${Object.keys(wb.Sheets).join(', ')}`);
+        console.log('Worksheet found:', !!ws);
+        if (!ws) throw new Error(`Cannot access Promotion sheet. SheetNames: ${sheetNames.join(', ')}, Keys: ${sheetKeys.join(', ')}`);
 
         // Force read range to cover all data columns
         ws['!ref'] = 'A1:BV2000';
