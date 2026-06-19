@@ -685,6 +685,10 @@
           const promoId = String(row[COL.PROMO_ID] || '').trim();
           if (!promoId) continue; // skip empty rows
 
+          // Filter: only include rows where column AL (index 37) = 1015
+          const plantGroup = String(row[37] || '').trim();
+          if (plantGroup !== '1015') continue;
+
           parsedRows.push({
             promo_id:    promoId,
             material:    String(row[COL.MATERIAL]    || '').trim(),
