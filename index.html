@@ -606,33 +606,36 @@
         console.log('XLSX version:', XLSX.version);
 
         const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: 'array', cellFormula: false, cellNF: false, cellStyles: false });
+        const wb = XLSX.read(data, { type: 'array', dense: true, cellFormula: false, cellNF: false, cellStyles: false });
 
         // Log all sheet names for debugging
         console.log('Sheet names found:', JSON.stringify(wb.SheetNames));
+        console.log('Sheets object keys:', JSON.stringify(Object.keys(wb.Sheets)));
 
-        // Try to find Promotion sheet — case-insensitive
-        let sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === 'promotion');
-        if (!sheetName) sheetName = wb.SheetNames[1]; // fallback: 2nd sheet
-        if (!sheetName) sheetName = wb.SheetNames[0]; // last resort: 1st sheet
-
-        console.log('Sheets object keys:', Object.keys(wb.Sheets));
-
-        // Access sheet directly by matching key from Sheets object
-        const sheetKey = Object.keys(wb.Sheets).find(k => k.trim().toLowerCase() === 'promotion')
-                      || Object.keys(wb.Sheets)[1]
-                      || Object.keys(wb.Sheets)[0];
+        // Find Promotion sheet key — match from actual Sheets object keys
+        const allKeys = Object.keys(wb.Sheets);
+        const sheetKey = allKeys.find(k => k.trim().toLowerCase() === 'promotion')
+                      || allKeys.find(k => k.toLowerCase().includes('promo'))
+                      || allKeys[1]
+                      || allKeys[0];
 
         console.log('Using sheet key:', sheetKey);
         const ws = wb.Sheets[sheetKey];
+        if (!ws) throw new Error(`Sheet undefined. Keys available: ${allKeys.join(', ')}`);
 
-        if (!ws) throw new Error(`Sheet object undefined for key "${sheetKey}". Keys: ${Object.keys(wb.Sheets).join(', ')}`);
-
-        // Force the range — SAP exports often don't set !ref correctly
-        ws['!ref'] = 'A1:BV2000';
-        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
-        console.log('Total rows read:', raw.length);
-        if (raw[7]) console.log('Row 8 sample (first 5 cols):', raw[7].slice(0, 5));
+        // Read using dense array (ws['!data']) if available, else fall back to sheet_to_json
+        let raw = [];
+        if (ws['!data']) {
+          // Dense mode: ws['!data'] is array of arrays of cell objects
+          raw = ws['!data'].map(row =>
+            row ? row.map(cell => cell ? cell.v : '') : []
+          );
+          console.log('Using dense mode, rows:', raw.length);
+        } else {
+          ws['!ref'] = 'A1:BV2000';
+          raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
+          console.log('Using sheet_to_json mode, rows:', raw.length);
+        }
 
         const timestamp = formatTimestamp(new Date());
 
