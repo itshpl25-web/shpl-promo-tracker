@@ -514,7 +514,7 @@
 <script>
   // ── CONFIG ──────────────────────────────────────────────────────────
   // Replace this with your deployed Google Apps Script Web App URL
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxu3EzCasoUr6PxqrvsN-MGQx8_8UVr6TJAPCcW9X2u8w3W5NrwMwV8i5JKo-51onm5/exec";
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxu3EzCasoUr6PxqrvsN-MGQx8_8UVr6TJAPCcW9X2u8w3W5NrwMwV8i5JKo-51onm5/exec';
 
   // Column indices (0-based) in the Promotion sheet
   // Verified from actual SAP export files
@@ -606,13 +606,24 @@
         console.log('XLSX version:', XLSX.version);
 
         const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: 'array', dense: true, cellFormula: false, cellNF: false, cellStyles: false });
 
-        // Log all sheet names for debugging
-        console.log('Sheet names found:', JSON.stringify(wb.SheetNames));
-        console.log('Sheets object keys:', JSON.stringify(Object.keys(wb.Sheets)));
+        // First pass: get sheet names only (fast)
+        const wbNames = XLSX.read(data, { type: 'array', bookSheets: true });
+        console.log('All sheet names:', JSON.stringify(wbNames.SheetNames));
 
-        // Find Promotion sheet key — match from actual Sheets object keys
+        // Second pass: force-load ALL sheets including hidden ones
+        const wb = XLSX.read(data, {
+          type: 'array',
+          dense: true,
+          cellFormula: false,
+          cellNF: false,
+          cellStyles: false,
+          sheets: wbNames.SheetNames, // explicitly load every sheet by name
+        });
+
+        console.log('Sheets object keys after forced load:', JSON.stringify(Object.keys(wb.Sheets)));
+
+        // Find Promotion sheet key
         const allKeys = Object.keys(wb.Sheets);
         const sheetKey = allKeys.find(k => k.trim().toLowerCase() === 'promotion')
                       || allKeys.find(k => k.toLowerCase().includes('promo'))
@@ -623,10 +634,9 @@
         const ws = wb.Sheets[sheetKey];
         if (!ws) throw new Error(`Sheet undefined. Keys available: ${allKeys.join(', ')}`);
 
-        // Read using dense array (ws['!data']) if available, else fall back to sheet_to_json
+        // Read using dense array
         let raw = [];
         if (ws['!data']) {
-          // Dense mode: ws['!data'] is array of arrays of cell objects
           raw = ws['!data'].map(row =>
             row ? row.map(cell => cell ? cell.v : '') : []
           );
@@ -657,7 +667,7 @@
         }
 
         if (parsedRows.length === 0) {
-          showToast('error', 'No data found', `Sheet "${sheetName}" has no data from row 8 onwards. Total rows read: ${raw.length}`);
+          showToast('error', 'No data found', `Sheet "${sheetKey}" has no data from row 8 onwards. Total rows read: ${raw.length}`);
           resetUI();
           return;
         }
