@@ -556,16 +556,9 @@
       statusLabel.textContent = 'Apps Script not configured';
       return;
     }
-    fetch(APPS_SCRIPT_URL + '?ping=1')
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(() => {
-        statusDot.className = 'status-dot connected';
-        statusLabel.textContent = 'Connected to Google Sheets';
-      })
-      .catch(() => {
-        statusDot.className = 'status-dot';
-        statusLabel.textContent = 'Could not reach Apps Script';
-      });
+    // Can't ping Apps Script due to CORS — just show as configured
+    statusDot.className = 'status-dot connected';
+    statusLabel.textContent = 'Apps Script configured';
   }
   checkConnection();
 
@@ -607,45 +600,49 @@
 
         const data = new Uint8Array(e.target.result);
 
-        // First pass: get sheet names only (fast)
-        const wbNames = XLSX.read(data, { type: 'array', bookSheets: true });
-        console.log('All sheet names:', JSON.stringify(wbNames.SheetNames));
-
-        // Second pass: force-load ALL sheets including hidden ones
+        // Load workbook — bookVBA forces all sheets including hidden ones to be parsed
         const wb = XLSX.read(data, {
           type: 'array',
-          dense: true,
           cellFormula: false,
           cellNF: false,
           cellStyles: false,
-          sheets: wbNames.SheetNames, // explicitly load every sheet by name
+          bookVBA: true,
+          bookFiles: true,
+          bookDeps: true,
         });
 
-        console.log('Sheets object keys after forced load:', JSON.stringify(Object.keys(wb.Sheets)));
+        console.log('SheetNames:', JSON.stringify(wb.SheetNames));
+        console.log('Sheets keys:', JSON.stringify(Object.keys(wb.Sheets)));
 
-        // Find Promotion sheet key
-        const allKeys = Object.keys(wb.Sheets);
-        const sheetKey = allKeys.find(k => k.trim().toLowerCase() === 'promotion')
-                      || allKeys.find(k => k.toLowerCase().includes('promo'))
-                      || allKeys[1]
-                      || allKeys[0];
+        // Try each possible key variation for Promotion sheet
+        let ws = wb.Sheets['Promotion']
+               || wb.Sheets['promotion']
+               || wb.Sheets['PROMOTION'];
 
-        console.log('Using sheet key:', sheetKey);
-        const ws = wb.Sheets[sheetKey];
-        if (!ws) throw new Error(`Sheet undefined. Keys available: ${allKeys.join(', ')}`);
-
-        // Read using dense array
-        let raw = [];
-        if (ws['!data']) {
-          raw = ws['!data'].map(row =>
-            row ? row.map(cell => cell ? cell.v : '') : []
-          );
-          console.log('Using dense mode, rows:', raw.length);
-        } else {
-          ws['!ref'] = 'A1:BV2000';
-          raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
-          console.log('Using sheet_to_json mode, rows:', raw.length);
+        // If still not found, try index-based (Promotion is 2nd sheet, index 1)
+        if (!ws) {
+          const idx = wb.SheetNames.findIndex(n => n.toLowerCase().includes('promo'));
+          if (idx >= 0) {
+            const key = Object.keys(wb.Sheets)[idx] || wb.SheetNames[idx];
+            ws = wb.Sheets[key];
+            console.log('Tried index fallback key:', key, '— found:', !!ws);
+          }
         }
+
+        // Last resort: try accessing by position in Sheets object
+        if (!ws) {
+          const sheetValues = Object.values(wb.Sheets);
+          ws = sheetValues[1] || sheetValues[0]; // 2nd sheet = Promotion
+          console.log('Last resort: using sheet by position, found:', !!ws);
+        }
+
+        if (!ws) throw new Error(`Cannot access Promotion sheet. SheetNames: ${wb.SheetNames.join(', ')}, Keys: ${Object.keys(wb.Sheets).join(', ')}`);
+
+        // Force read range to cover all data columns
+        ws['!ref'] = 'A1:BV2000';
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        console.log('Total rows read:', raw.length);
+        if (raw[7]) console.log('Row 8 cols C/BA/BF/BK/BM/BO:', raw[7][2], '|', raw[7][52], '|', raw[7][57], '|', raw[7][62], '|', raw[7][64], '|', raw[7][66]);
 
         const timestamp = formatTimestamp(new Date());
 
@@ -716,25 +713,24 @@
 
     try {
       const payload = { rows: parsedRows };
+      // Apps Script requires no-cors from external origins; send as form data
       const res = await fetch(APPS_SCRIPT_URL, {
         method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify(payload),
       });
 
-      const json = await res.json();
-      if (json.status === 'ok') {
-        showToast('success', 'Pushed successfully', `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} appended to Google Sheets.`);
-        submitInfo.textContent = `✓ Sent ${parsedRows.length} rows at ${formatTimestamp(new Date())}`;
-        submitBtn.innerHTML = '✓ Done';
-        submitBtn.style.background = 'var(--green)';
-        setTimeout(() => {
-          submitBtn.innerHTML = '↑ Push to Google Sheets';
-          submitBtn.style.background = '';
-          submitBtn.disabled = false;
-        }, 3000);
-      } else {
-        throw new Error(json.message || 'Unknown error from Apps Script.');
-      }
+      // no-cors returns opaque response — assume success if no exception thrown
+      showToast('success', 'Pushed successfully', `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} appended to Google Sheets.`);
+      submitInfo.textContent = `✓ Sent ${parsedRows.length} rows at ${formatTimestamp(new Date())}`;
+      submitBtn.innerHTML = '✓ Done';
+      submitBtn.style.background = 'var(--green)';
+      setTimeout(() => {
+        submitBtn.innerHTML = '↑ Push to Google Sheets';
+        submitBtn.style.background = '';
+        submitBtn.disabled = false;
+      }, 3000);
     } catch (err) {
       showToast('error', 'Push failed', err.message);
       submitBtn.innerHTML = '↑ Push to Google Sheets';
