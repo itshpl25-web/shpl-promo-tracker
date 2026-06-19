@@ -409,6 +409,69 @@
       color: var(--text-dim);
       font-size: 13px;
     }
+
+    /* ── URL input section ── */
+    .url-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 20px;
+    }
+
+    .url-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+
+    .url-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .url-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 13px;
+      padding: 9px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+      font-family: monospace;
+    }
+
+    .url-input:focus { border-color: var(--accent); }
+    .url-input::placeholder { color: var(--text-dim); font-family: sans-serif; }
+
+    .url-hint {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 8px;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 20px 0;
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+
+    .divider::before,
+    .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
   </style>
 </head>
 <body>
@@ -424,6 +487,22 @@
 </header>
 
 <main>
+
+  <!-- URL Input (primary method) -->
+  <div class="url-section" id="urlSection">
+    <div class="url-label">Promotion Form URL</div>
+    <div class="url-row">
+      <input type="text" id="urlInput" class="url-input"
+        placeholder="http://evergreen.webredirect.org/sap_promotion/promotionform?requestid=..." />
+      <button class="btn btn-primary" id="urlFetchBtn">↓ Fetch Data</button>
+    </div>
+    <div class="url-hint">Paste the promotion form URL — data will be fetched automatically via Apps Script</div>
+  </div>
+
+  <!-- Divider -->
+  <div class="divider">
+    <span>or upload Excel file</span>
+  </div>
 
   <!-- File badge (shown after file selected) -->
   <div class="file-badge" id="fileBadge">
@@ -533,15 +612,17 @@
 
   let parsedRows = [];
 
-  const dropZone   = document.getElementById('dropZone');
-  const fileInput  = document.getElementById('fileInput');
-  const fileBadge  = document.getElementById('fileBadge');
-  const fileName   = document.getElementById('fileName');
-  const fileMeta   = document.getElementById('fileMeta');
-  const clearBtn   = document.getElementById('clearBtn');
-  const dropSection= document.getElementById('dropSection');
-  const previewSec = document.getElementById('preview-section');
-  const previewBody= document.getElementById('previewBody');
+  const dropZone    = document.getElementById('dropZone');
+  const fileInput   = document.getElementById('fileInput');
+  const fileBadge   = document.getElementById('fileBadge');
+  const fileName    = document.getElementById('fileName');
+  const fileMeta    = document.getElementById('fileMeta');
+  const clearBtn    = document.getElementById('clearBtn');
+  const dropSection = document.getElementById('dropSection');
+  const previewSec  = document.getElementById('preview-section');
+  const previewBody = document.getElementById('previewBody');
+  const urlFetchBtn = document.getElementById('urlFetchBtn');
+  const urlInput    = document.getElementById('urlInput');
   const rowCount   = document.getElementById('rowCount');
   const submitBtn  = document.getElementById('submitBtn');
   const resetBtn   = document.getElementById('resetBtn');
@@ -563,7 +644,39 @@
   }
   checkConnection();
 
-  // ── Drag & drop ──────────────────────────────────────────────────
+  // ── URL fetch ────────────────────────────────────────────────────
+  urlFetchBtn.addEventListener('click', fetchFromUrl);
+  urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') fetchFromUrl(); });
+
+  async function fetchFromUrl() {
+    const url = urlInput.value.trim();
+    if (!url) { showToast('error', 'No URL', 'Please paste a promotion form URL first.'); return; }
+    if (!url.includes('promotionform')) { showToast('error', 'Invalid URL', 'URL should contain "promotionform".'); return; }
+
+    urlFetchBtn.disabled = true;
+    urlFetchBtn.innerHTML = '<div class="spinner"></div> Fetching...';
+
+    try {
+      const res  = await fetch(`${APPS_SCRIPT_URL}?url=${encodeURIComponent(url)}`);
+      const json = await res.json();
+
+      if (json.status !== 'ok') throw new Error(json.message || 'Fetch failed.');
+
+      const { promoId, supplier, rows } = json.data;
+      if (!rows || rows.length === 0) throw new Error('No material rows found on that page.');
+
+      const timestamp = formatTimestamp(new Date());
+      parsedRows = rows.map(r => ({ ...r, status: 'Printed on ' + timestamp }));
+
+      renderPreview();
+      showToast('success', 'Data fetched!', `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} loaded from the promotion form.`);
+    } catch (err) {
+      showToast('error', 'Fetch failed', err.message);
+    } finally {
+      urlFetchBtn.disabled = false;
+      urlFetchBtn.innerHTML = '↓ Fetch Data';
+    }
+  }
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
   dropZone.addEventListener('drop', e => {
