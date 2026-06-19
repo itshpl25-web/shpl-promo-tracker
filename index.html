@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SHPL Promotion Tracker</title>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
     :root {
       --bg: #0f1117;
@@ -593,60 +594,88 @@
       showToast('error', 'Failed to read file', 'FileReader could not read the file.');
       resetUI();
     };
-    reader.onload = e => {
+    reader.onload = async e => {
       try {
         console.log('File loaded, size:', e.target.result.byteLength);
-        console.log('XLSX version:', XLSX.version);
 
-        const data = new Uint8Array(e.target.result);
+        const data = e.target.result;
 
-        // Load workbook — bookVBA forces all sheets including hidden ones to be parsed
-        const wb = XLSX.read(data, {
-          type: 'array',
-          cellFormula: false,
-          cellNF: false,
-          cellStyles: false,
-          bookVBA: true,
-          bookFiles: true,
-          bookDeps: true,
+        // Open xlsx as a zip and read Promotion sheet XML directly
+        const zip = await JSZip.loadAsync(data);
+
+        // Step 1: Find which rId = Promotion in workbook.xml
+        const wbXml = await zip.file('xl/workbook.xml').async('string');
+        const parser = new DOMParser();
+        const wbDoc  = parser.parseFromString(wbXml, 'application/xml');
+        let promotionRid = null;
+        wbDoc.querySelectorAll('sheet').forEach(s => {
+          const name = s.getAttribute('name');
+          const rid  = s.getAttribute('r:id') || s.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+          console.log(`Sheet: name="${name}" rId="${rid}"`);
+          if (name && name.trim().toLowerCase() === 'promotion') promotionRid = rid;
         });
+        if (!promotionRid) throw new Error('Promotion sheet not found in workbook.xml');
 
-        console.log('SheetNames:', JSON.stringify(wb.SheetNames));
-        console.log('Sheets keys:', JSON.stringify(Object.keys(wb.Sheets)));
+        // Step 2: Resolve rId to actual file path via workbook.xml.rels
+        const relsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+        const relsDoc = parser.parseFromString(relsXml, 'application/xml');
+        let sheetPath = null;
+        relsDoc.querySelectorAll('Relationship').forEach(r => {
+          if (r.getAttribute('Id') === promotionRid) {
+            const target = r.getAttribute('Target');
+            sheetPath = target.startsWith('/xl/') ? target.slice(1) : 'xl/' + target;
+          }
+        });
+        if (!sheetPath) throw new Error(`Cannot resolve file for rId="${promotionRid}"`);
+        console.log('Promotion sheet file:', sheetPath);
 
-        // SheetJS sometimes loads sheets in rId order, not display order.
-        // SheetNames = display order, wb.Sheets keys = may differ.
-        // Strategy: match SheetNames index to wb.Sheets values by position.
-        const sheetNames = wb.SheetNames;
-        const sheetKeys  = Object.keys(wb.Sheets);
-        console.log('SheetNames:', JSON.stringify(sheetNames));
-        console.log('Sheets keys:', JSON.stringify(sheetKeys));
+        // Step 3: Load shared strings (text values are stored by index)
+        const sharedStrings = [];
+        const ssFile = zip.file('xl/sharedStrings.xml');
+        if (ssFile) {
+          const ssXml = await ssFile.async('string');
+          const ssDoc = parser.parseFromString(ssXml, 'application/xml');
+          ssDoc.querySelectorAll('si').forEach(si => {
+            sharedStrings.push([...si.querySelectorAll('t')].map(t => t.textContent).join(''));
+          });
+        }
+        console.log('Shared strings:', sharedStrings.length);
 
-        // Find index of 'Promotion' in SheetNames
-        const promoIdx = sheetNames.findIndex(n => n.trim().toLowerCase() === 'promotion');
-        console.log('Promotion index in SheetNames:', promoIdx);
+        // Step 4: Parse the sheet XML into a 2D grid
+        const sheetXml = await zip.file(sheetPath).async('string');
+        const sheetDoc = parser.parseFromString(sheetXml, 'application/xml');
+        const rowEls   = sheetDoc.querySelectorAll('row');
+        console.log('XML row elements:', rowEls.length);
 
-        // Get the sheet by that same positional index from Sheets values
-        let ws = null;
-        if (promoIdx >= 0) {
-          const sheetVals = Object.values(wb.Sheets);
-          ws = wb.Sheets[sheetNames[promoIdx]]  // try direct name match first
-            || sheetVals[promoIdx]               // try positional match
-            || sheetVals[1]                      // fallback: 2nd sheet
-            || sheetVals[0];
-        } else {
-          const sheetVals = Object.values(wb.Sheets);
-          ws = sheetVals[1] || sheetVals[0];
+        function colToIdx(col) {
+          let n = 0;
+          for (let i = 0; i < col.length; i++) n = n * 26 + col.charCodeAt(i) - 64;
+          return n - 1;
         }
 
-        console.log('Worksheet found:', !!ws);
-        if (!ws) throw new Error(`Cannot access Promotion sheet. SheetNames: ${sheetNames.join(', ')}, Keys: ${sheetKeys.join(', ')}`);
+        const grid = [];
+        rowEls.forEach(rowEl => {
+          const rowIdx = parseInt(rowEl.getAttribute('r')) - 1;
+          while (grid.length <= rowIdx) grid.push([]);
+          rowEl.querySelectorAll('c').forEach(cell => {
+            const ref = cell.getAttribute('r');
+            const colStr = ref.replace(/\d+$/, '');
+            const colIdx = colToIdx(colStr);
+            while (grid[rowIdx].length <= colIdx) grid[rowIdx].push('');
+            const t  = cell.getAttribute('t');
+            const vEl = cell.querySelector('v');
+            let val = '';
+            if (vEl) {
+              if (t === 's') val = sharedStrings[parseInt(vEl.textContent)] ?? '';
+              else val = isNaN(vEl.textContent) ? vEl.textContent : Number(vEl.textContent);
+            }
+            grid[rowIdx][colIdx] = val;
+          });
+        });
 
-        // Force read range to cover all data columns
-        ws['!ref'] = 'A1:BV2000';
-        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-        console.log('Total rows read:', raw.length);
-        if (raw[7]) console.log('Row 8 cols C/BA/BF/BK/BM/BO:', raw[7][2], '|', raw[7][52], '|', raw[7][57], '|', raw[7][62], '|', raw[7][64], '|', raw[7][66]);
+        const raw = grid;
+        console.log('Grid rows:', raw.length);
+        if (raw[7]) console.log('Row8 C/BA/BF/BK/BM/BO:', raw[7][2], '|', raw[7][52], '|', raw[7][57], '|', raw[7][62], '|', raw[7][64], '|', raw[7][66]);
 
         const timestamp = formatTimestamp(new Date());
 
@@ -668,7 +697,7 @@
         }
 
         if (parsedRows.length === 0) {
-          showToast('error', 'No data found', `Sheet "${sheetKey}" has no data from row 8 onwards. Total rows read: ${raw.length}`);
+          showToast('error', 'No data found', `Promotion sheet has no data from row 8 onwards. Total rows read: ${raw.length}`);
           resetUI();
           return;
         }
