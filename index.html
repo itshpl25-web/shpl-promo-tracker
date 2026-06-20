@@ -648,6 +648,28 @@
   urlFetchBtn.addEventListener('click', fetchFromUrl);
   urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') fetchFromUrl(); });
 
+  // Listen for messages from the popup
+  window.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'PROMO_DATA') {
+      const data = event.data.payload;
+      console.log('Received from popup:', data);
+
+      if (!data.rows || data.rows.length === 0) {
+        showToast('error', 'No data', 'No material rows found in the popup page.');
+        urlFetchBtn.disabled = false;
+        urlFetchBtn.innerHTML = '↓ Fetch Data';
+        return;
+      }
+
+      const timestamp = formatTimestamp(new Date());
+      parsedRows = data.rows.map(r => ({ ...r, status: 'Printed on ' + timestamp }));
+      renderPreview();
+      showToast('success', 'Data loaded!', `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} loaded from the promotion form.`);
+      urlFetchBtn.disabled = false;
+      urlFetchBtn.innerHTML = '↓ Fetch Data';
+    }
+  });
+
   async function fetchFromUrl() {
     const url = urlInput.value.trim();
     if (!url) { showToast('error', 'No URL', 'Please paste a promotion form URL first.'); return; }
@@ -655,150 +677,112 @@
 
     urlFetchBtn.disabled = true;
     urlFetchBtn.innerHTML = '<div class="spinner"></div> Opening page...';
-    showToast('info', 'Opening promotion page...', 'Please wait while the page loads in the popup.');
 
-    try {
-      // Open the promo page in a popup — user is already logged in so it loads fine
-      const popup = window.open(url, 'promoPopup',
-        'width=1200,height=800,scrollbars=yes,resizable=yes'
-      );
+    // Open the popup
+    const popup = window.open(url, 'promoPopup', 'width=1200,height=800,scrollbars=yes,resizable=yes');
 
-      if (!popup) {
-        throw new Error('Popup was blocked. Please allow popups for this site and try again.');
-      }
-
-      // Wait for popup to fully load
-      urlFetchBtn.innerHTML = '<div class="spinner"></div> Waiting for page...';
-      await waitForPopup(popup);
-
-      // Read the DOM from the popup
-      urlFetchBtn.innerHTML = '<div class="spinner"></div> Reading data...';
-      const data = readPromoFromPopup(popup, url);
-
-      // Close popup
-      popup.close();
-
-      if (!data.rows || data.rows.length === 0) {
-        throw new Error('No material rows found. Make sure you\'re logged in to the promotion system.');
-      }
-
-      const timestamp = formatTimestamp(new Date());
-      parsedRows = data.rows.map(r => ({ ...r, status: 'Printed on ' + timestamp }));
-
-      renderPreview();
-      showToast('success', 'Data loaded!', `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} loaded from the promotion form.`);
-
-    } catch (err) {
-      showToast('error', 'Fetch failed', err.message);
-    } finally {
+    if (!popup) {
+      showToast('error', 'Popup blocked', 'Please allow popups for this site and try again.');
       urlFetchBtn.disabled = false;
       urlFetchBtn.innerHTML = '↓ Fetch Data';
+      return;
     }
-  }
 
-  // Wait for popup to load (poll until document is ready)
-  function waitForPopup(popup) {
-    return new Promise((resolve, reject) => {
-      let attempts = 0;
-      const maxAttempts = 60; // 30 seconds max
-      const interval = setInterval(() => {
-        attempts++;
-        try {
-          const state = popup.document.readyState;
-          const title = popup.document.title;
-          // Wait until page is fully loaded and not on login page
-          if (state === 'complete' && title && title !== '') {
-            clearInterval(interval);
-            // Extra wait for JS to render the table
-            setTimeout(resolve, 2000);
-          }
-        } catch(e) {
-          // Cross-origin error — popup is on a different domain or blocked
-          clearInterval(interval);
-          reject(new Error('Cannot read popup — the page may have cross-origin restrictions. Try the Excel upload method instead.'));
-        }
-        if (attempts >= maxAttempts) {
-          clearInterval(interval);
-          reject(new Error('Page took too long to load. Please try again.'));
-        }
-      }, 500);
-    });
-  }
+    showToast('info', 'Popup opened', 'Waiting for the page to load... (this may take a few seconds)');
 
-  // Read promotion data from popup DOM
-  function readPromoFromPopup(popup, url) {
-    const doc = popup.document;
+    // Poll until popup is ready, then inject extractor script
+    let attempts = 0;
+    const maxAttempts = 60;
+    const interval = setInterval(() => {
+      attempts++;
 
-    // Extract Promotion ID from heading
-    const heading = doc.querySelector('h3, h2, h1, .card-header');
-    const headingText = heading ? heading.textContent : doc.body.textContent;
-    const promoIdMatch = headingText.match(/Promotion\s+ID\s*:\s*([\d]+)/i);
-    const promoId = promoIdMatch ? promoIdMatch[1].trim() : '';
-
-    // Extract Supplier
-    let supplier = '';
-    const supplierSelects = doc.querySelectorAll('select');
-    supplierSelects.forEach(sel => {
-      const selected = sel.options[sel.selectedIndex];
-      if (selected && selected.text && selected.text.includes('[')) {
-        supplier = selected.text.trim();
+      if (popup.closed) {
+        clearInterval(interval);
+        showToast('error', 'Popup closed', 'The popup was closed before data could be read.');
+        urlFetchBtn.disabled = false;
+        urlFetchBtn.innerHTML = '↓ Fetch Data';
+        return;
       }
-    });
 
-    // Extract requestid from URL
+      try {
+        // Try to access popup DOM — will throw if cross-origin
+        const readyState = popup.document.readyState;
+        const title = popup.document.title;
+
+        if (readyState === 'complete' && title) {
+          clearInterval(interval);
+          urlFetchBtn.innerHTML = '<div class="spinner"></div> Reading data...';
+
+          // Wait extra 2s for DataTables to render
+          setTimeout(() => {
+            try {
+              injectExtractor(popup, url);
+            } catch(e) {
+              console.error('Inject error:', e);
+              showToast('error', 'Read failed', e.message);
+              popup.close();
+              urlFetchBtn.disabled = false;
+              urlFetchBtn.innerHTML = '↓ Fetch Data';
+            }
+          }, 2500);
+        }
+      } catch(e) {
+        // Cross-origin block
+        clearInterval(interval);
+        popup.close();
+        showToast('error', 'Cross-origin blocked', 'The promotion site blocked access from this app. Please use the Excel upload method instead.');
+        urlFetchBtn.disabled = false;
+        urlFetchBtn.innerHTML = '↓ Fetch Data';
+      }
+
+      if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        popup.close();
+        showToast('error', 'Timeout', 'Page took too long to load.');
+        urlFetchBtn.disabled = false;
+        urlFetchBtn.innerHTML = '↓ Fetch Data';
+      }
+    }, 500);
+  }
+
+  function injectExtractor(popup, url) {
+    const doc = popup.document;
     const reqMatch = url.match(/requestid=([^&]+)/);
     const requestId = reqMatch ? reqMatch[1] : '';
 
-    // Find the materials table — look for table with MATERIAL rows
-    const rows = [];
-    const tables = doc.querySelectorAll('table');
-    tables.forEach(table => {
-      const trs = table.querySelectorAll('tbody tr');
-      trs.forEach(tr => {
-        const tds = tr.querySelectorAll('td');
-        if (tds.length >= 8) {
-          const lineType = tds[0].textContent.trim();
-          if (lineType === 'MATERIAL') {
-            rows.push({
-              promo_id:    promoId || requestId,
-              material:    tds[1].textContent.trim(),
-              description: tds[3].textContent.trim(),
-              normal_p:    tds[6].textContent.trim(),
-              promo_p:     tds[7].textContent.trim(),
-              supplier:    supplier,
-            });
-          }
-        }
-      });
+    // Extract Promotion ID
+    const bodyText = doc.body.innerText || '';
+    const promoIdMatch = bodyText.match(/Promotion\s+ID\s*:\s*([\d]+)/i);
+    const promoId = promoIdMatch ? promoIdMatch[1].trim() : requestId;
+
+    // Extract Supplier from select box
+    let supplier = '';
+    doc.querySelectorAll('select').forEach(sel => {
+      const opt = sel.options[sel.selectedIndex];
+      if (opt && opt.text && opt.text.includes('[')) supplier = opt.text.trim();
     });
 
-    // Fallback: try DataTables hidden rows via the XHR data already in the page
-    if (rows.length === 0) {
-      const scripts = doc.querySelectorAll('script');
-      scripts.forEach(s => {
-        const m = s.textContent.match(/"data"\s*:\s*(\[\[.*?\]\])/s);
-        if (m) {
-          try {
-            const data = JSON.parse(m[1]);
-            data.forEach(r => {
-              if (Array.isArray(r) && r[0] === 'MATERIAL') {
-                rows.push({
-                  promo_id:    promoId || requestId,
-                  material:    String(r[1] || '').trim(),
-                  description: String(r[3] || '').trim(),
-                  normal_p:    r[6] !== undefined ? r[6] : '',
-                  promo_p:     r[7] !== undefined ? r[7] : '',
-                  supplier:    supplier,
-                });
-              }
-            });
-          } catch(e) {}
-        }
-      });
-    }
+    // Extract rows from visible table
+    const rows = [];
+    doc.querySelectorAll('table tbody tr').forEach(tr => {
+      const tds = tr.querySelectorAll('td');
+      if (tds.length >= 8 && tds[0].textContent.trim() === 'MATERIAL') {
+        rows.push({
+          promo_id:    promoId,
+          material:    tds[1].textContent.trim(),
+          description: tds[3].textContent.trim(),
+          normal_p:    tds[6].textContent.trim(),
+          promo_p:     tds[7].textContent.trim(),
+          supplier:    supplier,
+        });
+      }
+    });
 
-    console.log('Popup promoId:', promoId, 'rows:', rows.length);
-    return { promoId, supplier, rows };
+    console.log('Extracted rows:', rows.length, 'promoId:', promoId);
+
+    // Send data back to parent window
+    window.postMessage({ type: 'PROMO_DATA', payload: { promoId, supplier, rows } }, '*');
+    popup.close();
   }
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
